@@ -1,9 +1,32 @@
 import express from "express";
+import https from "https";
+import fs from "fs";
 
 const app = express();
 app.use(express.json({ type: "*/*", limit: "2mb" }));
 
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "";
+const TLS_KEY_PATH = process.env.TLS_KEY_PATH || "server.key";
+const TLS_CERT_PATH = process.env.TLS_CERT_PATH || "server.crt";
+const MTLS_CA_PATH = process.env.MTLS_CA_PATH || "ca.crt";
+
+const readPem = (label, filePath) => {
+  try {
+    return fs.readFileSync(filePath);
+  } catch (error) {
+    console.error(`Missing ${label} at ${filePath}`);
+    throw error;
+  }
+};
+
+const tlsOptions = {
+  key: readPem("TLS key", TLS_KEY_PATH),
+  cert: readPem("TLS cert", TLS_CERT_PATH),
+  ca: readPem("mTLS CA", MTLS_CA_PATH),
+  requestCert: true,
+  rejectUnauthorized: true,
+  minVersion: "TLSv1.2",
+};
 
 let latest = { receivedAt: null, payload: null };
 
@@ -89,27 +112,26 @@ app.get("/", (_req, res) => {
       ];
 
       const summary = document.getElementById("summary");
-      summary.innerHTML = cards.map(([label, value]) => \`
-        <div class="card">
-          <div class="label">\${label}</div>
-          <div class="value">\${String(value)}</div>
-        </div>
-      \`).join("");
+      summary.innerHTML = cards.map(([label, value]) =>
+        '<div class="card">' +
+          '<div class="label">' + label + '</div>' +
+          '<div class="value">' + String(value) + '</div>' +
+        '</div>'
+      ).join("");
 
       const storedPortrait = nfc.storedPortrait;
       const livePortrait = live.livePortrait;
 
       if (storedPortrait || livePortrait) {
-        summary.innerHTML += \`
-          <div class="card">
-            <div class="label">Stored Portrait</div>
-            \${storedPortrait ? \`<img src="\${storedPortrait}" />\` : "<div class='muted'>—</div>"}
-          </div>
-          <div class="card">
-            <div class="label">Live Portrait</div>
-            \${livePortrait ? \`<img src="\${livePortrait}" />\` : "<div class='muted'>—</div>"}
-          </div>
-        \`;
+        summary.innerHTML +=
+          '<div class="card">' +
+            '<div class="label">Stored Portrait</div>' +
+            (storedPortrait ? '<img src="' + storedPortrait + '" />' : "<div class='muted'>—</div>") +
+          '</div>' +
+          '<div class="card">' +
+            '<div class="label">Live Portrait</div>' +
+            (livePortrait ? '<img src="' + livePortrait + '" />' : "<div class='muted'>—</div>") +
+          '</div>';
       }
     }
 
@@ -134,4 +156,6 @@ app.get("/", (_req, res) => {
 });
 
 const port = process.env.PORT || 3000;
-app.listen(port, () => console.log("✅ Running on port", port));
+https.createServer(tlsOptions, app).listen(port, () => {
+  console.log("✅ Running with mTLS on port", port);
+});
